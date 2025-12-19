@@ -1,0 +1,12 @@
+__pycache__
+.assets
+.claude
+.caches
+.idea
+.jobs
+.vscode
+facefusion-env/
+venv/
+.DS_Store
+*.zip
+*.pyc
