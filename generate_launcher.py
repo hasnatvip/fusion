@@ -147,7 +147,11 @@ else:
     print('[ERROR] layout file not found:', str(p.resolve()))
     sys.exit(1)
 
-
+# ── auto-repair broken files from previous runs ───────────────────────────────
+try:
+    subprocess.run(['git', 'checkout', 'facefusion/program_helper.py'], check=False, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+except Exception:
+    pass
 
 # ── quick argument sanity-check ───────────────────────────────────────────────
 print('\n[DIAG] Running facefusion.py run --help to verify args...')
