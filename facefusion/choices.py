@@ -110,6 +110,7 @@ execution_provider_set : ExecutionProviderSet =\
 	'migraphx': 'MIGraphXExecutionProvider',
 	'openvino': 'OpenVINOExecutionProvider',
 	'coreml': 'CoreMLExecutionProvider',
+	'coreml_cpu': 'CoreMLExecutionProvider',
 	'cpu': 'CPUExecutionProvider'
 }
 execution_providers : List[ExecutionProvider] = list(execution_provider_set.keys())

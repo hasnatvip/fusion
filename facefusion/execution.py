@@ -28,6 +28,37 @@ def get_available_execution_providers() -> List[ExecutionProvider]:
 	return available_execution_providers
 
 
+def get_optimal_execution_providers() -> List[ExecutionProvider]:
+	available_execution_providers = get_available_execution_providers()
+	
+	if not available_execution_providers:
+		return []
+	
+	# Import is_macos here to avoid circular dependency
+	from facefusion.common_helper import is_macos
+	
+	# Define priority order based on platform
+	if is_macos():
+		# On macOS: prioritize coreml (with Neural Engine/GPU) over cpu-only variants
+		priority_order = ['coreml', 'cuda', 'tensorrt', 'coreml_cpu', 'openvino', 'directml', 'migraphx', 'rocm', 'cpu']
+	else:
+		# On Windows/Linux: prioritize GPU providers
+		priority_order = ['cuda', 'tensorrt', 'directml', 'openvino', 'migraphx', 'rocm', 'coreml', 'coreml_cpu', 'cpu']
+	
+	# Return providers sorted by priority, keeping only those available
+	optimal_providers = []
+	for provider in priority_order:
+		if provider in available_execution_providers:
+			optimal_providers.append(provider)
+	
+	# Add any remaining providers not in priority list
+	for provider in available_execution_providers:
+		if provider not in optimal_providers:
+			optimal_providers.append(provider)
+	
+	return optimal_providers
+
+
 def create_inference_session_providers(execution_device_id : int, execution_providers : List[ExecutionProvider]) -> List[InferenceSessionProvider]:
 	inference_session_providers : List[InferenceSessionProvider] = []
 
@@ -70,6 +101,13 @@ def create_inference_session_providers(execution_device_id : int, execution_prov
 			{
 				'SpecializationStrategy': 'FastPrediction',
 				'ModelCacheDirectory': '.caches'
+			}))
+		if execution_provider == 'coreml_cpu':
+			inference_session_providers.append((facefusion.choices.execution_provider_set.get(execution_provider),
+			{
+				'SpecializationStrategy': 'FastPrediction',
+				'ModelCacheDirectory': '.caches',
+				'MLComputeUnits': 'CPUOnly'  # CPUOnly, CPUAndGPU, or All
 			}))
 
 	if 'cpu' in execution_providers:

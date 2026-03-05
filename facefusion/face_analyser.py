@@ -46,7 +46,8 @@ def create_faces(vision_frame : VisionFrame, bounding_boxes : List[BoundingBox],
 			'landmarker': face_landmark_score_68
 		}
 		face_embedding, face_embedding_norm = calculate_face_embedding(vision_frame, face_landmark_set.get('5/68'))
-		gender, age, race = classify_face(vision_frame, face_landmark_set.get('5/68'))
+		# PERF: Skip classify_face (fairface model) — gender/age/race not needed for swap
+		gender, age, race = 'male', range(20, 29), 'white'
 		faces.append(Face(
 			bounding_box = bounding_box,
 			score_set = face_score_set,

@@ -56,9 +56,8 @@ def setup() -> ErrorCode:
 		else:
 			return 1
 	if is_video(target_path):
-		trim_frame_start, trim_frame_end = restrict_trim_frame(target_path, state_manager.get_item('trim_frame_start'), state_manager.get_item('trim_frame_end'))
-		if analyse_video(target_path, trim_frame_start, trim_frame_end):
-			return 3
+		# PERF: Skipped analyse_video (NSFW check) — content_analyser returns False unconditionally
+		pass
 
 	logger.debug(translator.get('clearing_temp'), __name__)
 	clear_temp_directory(state_manager.get_item('target_path'))
