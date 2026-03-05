@@ -108,7 +108,7 @@ echo " ✅  Setup complete! Now run Cell 3 to launch the UI."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 """
 
-# Python launch script — run directly, bypassing bash argument quoting issues
+# Python launch script — exec'd directly in Colab kernel
 python_launch_script = r"""
 import subprocess, sys, os, re, pathlib
 
@@ -116,8 +116,24 @@ os.chdir('/content/workspace')
 
 print('[CHECK] cwd    :', os.getcwd())
 print('[CHECK] python :', sys.version.split()[0])
+sys.stdout.flush()
 
-# Patch share=True into ui layout
+# ── stream helper: Popen + PIPE so Colab sees every output line ───────────────
+def run_and_stream(cmd, cwd=None):
+    proc = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,   # merge stderr into stdout
+        text=True,
+        bufsize=1,
+        cwd=cwd or os.getcwd(),
+    )
+    for line in proc.stdout:
+        print(line, end='', flush=True)
+    proc.wait()
+    return proc.returncode
+
+# ── patch share=True ──────────────────────────────────────────────────────────
 p = pathlib.Path('facefusion/uis/layouts/default.py')
 if p.exists():
     src = p.read_text()
@@ -127,30 +143,40 @@ if p.exists():
         print('[PATCH] share=True added')
     else:
         print('[CHECK] share=True already present')
+else:
+    print('[ERROR] layout file not found:', str(p.resolve()))
+    sys.exit(1)
 
+# ── quick argument sanity-check ───────────────────────────────────────────────
+print('\n[DIAG] Running facefusion.py run --help to verify args...')
+sys.stdout.flush()
+rc_help = run_and_stream([sys.executable, 'facefusion.py', 'run', '--help'])
+if rc_help not in (0, 1):      # argparse --help exits 0 or 1 normally
+    print(f'[DIAG] --help returned {rc_help} — check output above')
+
+# ── launch: CUDA first, then CPU fallback ────────────────────────────────────
 print()
-print('━'*62)
-print(' 🚀  Starting — Gradio public URL will appear below')
+print('━'*64)
+print(' 🚀  Launching UI — Gradio public URL will appear below')
 print(' ⏳  Wait 30-60 sec for:  Running on public URL: https://...')
-print('━'*62)
+print('━'*64)
 sys.stdout.flush()
 
-# Try CUDA first (T4 GPU), fall back to CPU
-for providers in ['cuda', 'cpu']:
-    print(f'\n[TRY] execution-providers: {providers}')
+for provider in ['cuda', 'cpu']:
+    print(f'\n[TRY] --execution-providers {provider}')
     sys.stdout.flush()
     cmd = [
         sys.executable, 'facefusion.py', 'run',
-        '--execution-providers', providers,
+        '--execution-providers', provider,
         '--ui-layouts', 'default',
         '--ui-workflow', 'instant_runner',
     ]
-    result = subprocess.run(cmd, cwd='/content/workspace')
-    if result.returncode == 0:
+    rc = run_and_stream(cmd, cwd='/content/workspace')
+    if rc == 0:
         break
-    print(f'[WARN] {providers} failed with exit code {result.returncode}')
-    if providers == 'cpu':
-        print('[ERROR] Both providers failed. Check output above for traceback.')
+    print(f'\n[WARN] {provider} exited with code {rc}')
+    if provider == 'cpu':
+        print('[ERROR] Both providers failed — see full output above for traceback.')
 """
 
 
