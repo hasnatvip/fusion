@@ -147,6 +147,19 @@ else:
     print('[ERROR] layout file not found:', str(p.resolve()))
     sys.exit(1)
 
+# ── patch validate_actions to print failures ──────────────────────────────────
+p_prog = pathlib.Path('facefusion/program_helper.py')
+if p_prog.exists():
+    src = p_prog.read_text()
+    if 'FAILED VALIDATION' not in src:
+        src = re.sub(
+            r'(\s+)(return False)(\s+elif action\.default not in action\.choices:|\s+return True)',
+            r'\1print(f"FAILED VALIDATION: {getattr(action, \"dest\", \"unknown\")} (default={getattr(action, \"default\", \"n/a\")}, choices={getattr(action, \"choices\", \"n/a\")})")\1\2\3',
+            src
+        )
+        p_prog.write_text(src)
+
+
 # ── quick argument sanity-check ───────────────────────────────────────────────
 print('\n[DIAG] Running facefusion.py run --help to verify args...')
 sys.stdout.flush()
