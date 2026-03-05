@@ -83,11 +83,24 @@ PYEOF
 fi
 
 # ── install dependencies ──────────────────────────────────────────────────────
-echo "[INFO] Installing dependencies (this takes ~3 min)..."
-pip install -q -r requirements.txt
+echo "[INFO] Removing ALL existing onnxruntime variants first..."
+pip uninstall -q -y onnxruntime onnxruntime-gpu onnxruntime-training \
+    onnxruntime-directml onnxruntime-openvino 2>/dev/null || true
+
+echo "[INFO] Installing project requirements..."
+# Install requirements but exclude onnxruntime (we control that ourselves)
+grep -iv "onnxruntime" requirements.txt > /tmp/requirements_no_ort.txt
+pip install -q -r /tmp/requirements_no_ort.txt
+
+echo "[INFO] Installing onnx + onnxruntime-gpu (CUDA)..."
 pip install -q onnx==1.19.1
-pip uninstall -q -y onnxruntime 2>/dev/null || true
 pip install -q onnxruntime-gpu
+
+echo "[INFO] Verifying onnxruntime import..."
+python3 -c "from onnxruntime import InferenceSession; print('[OK] onnxruntime OK — providers:', InferenceSession.get_providers if hasattr(InferenceSession,'get_providers') else 'n/a')" \
+    || { echo "[ERROR] onnxruntime still broken — trying force reinstall..."; \
+         pip install -q --force-reinstall onnxruntime-gpu; \
+         python3 -c "from onnxruntime import InferenceSession; print('[OK] onnxruntime OK after reinstall')"; }
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
