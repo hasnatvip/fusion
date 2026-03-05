@@ -22,22 +22,70 @@ import zlib
 # 1. The real bash script that will run inside Colab
 # ─────────────────────────────────────────────────────────────────────────────
 bash_script = r"""#!/usr/bin/env bash
-set -e
 
-# ── clone & enter project ────────────────────────────────────────────────────
-# REPO_URL_PLACEHOLDER already contains x-access-token:{PAT}@ for fine-grained PATs
-git clone REPO_URL_PLACEHOLDER workspace
-cd workspace
+# ── clone & enter project ─────────────────────────────────────────────────────
+REPO_BASE="https://github.com/hasnatvip/fusion.git"
+RAW_TOKEN="TOKEN_PLACEHOLDER"
+DEST="workspace"
+
+clone_ok=0
+
+if [ -n "$RAW_TOKEN" ]; then
+    echo "[INFO] Trying clone with x-access-token..."
+    URL1="https://x-access-token:${RAW_TOKEN}@github.com/hasnatvip/fusion.git"
+    if git clone "$URL1" "$DEST" 2>&1; then
+        clone_ok=1
+    else
+        echo "[INFO] x-access-token failed, trying oauth2..."
+        URL2="https://oauth2:${RAW_TOKEN}@github.com/hasnatvip/fusion.git"
+        if git clone "$URL2" "$DEST" 2>&1; then
+            clone_ok=1
+        else
+            echo ""
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo " ❌  CLONE FAILED (403) — Token permission issue"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo " Your token was accepted by GitHub but has no READ access"
+            echo " to this repository. Fix it here:"
+            echo ""
+            echo "  1. Go to: https://github.com/settings/tokens"
+            echo "  2. Edit / regenerate your token"
+            echo "  3. Under 'Repository access' → choose 'Only select repos'"
+            echo "     and add:  hasnatvip/fusion"
+            echo "  4. Under 'Permissions → Contents' → set to 'Read-only'"
+            echo "  5. Save, copy the new token, re-run this cell"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            exit 1
+        fi
+    fi
+else
+    echo "[INFO] No token provided, trying public clone..."
+    if git clone "$REPO_BASE" "$DEST" 2>&1; then
+        clone_ok=1
+    else
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo " ❌  CLONE FAILED — Repo is private, token required"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo " Re-run this cell and enter a GitHub fine-grained PAT"
+        echo " with Contents: Read-only for hasnatvip/fusion"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        exit 1
+    fi
+fi
+
+cd "$DEST"
 
 # ── Python dependencies ───────────────────────────────────────────────────────
+echo "[INFO] Installing dependencies..."
 pip install -q -r requirements.txt
 pip install -q onnx==1.19.1
 pip uninstall -q -y onnxruntime 2>/dev/null || true
 pip install -q onnxruntime-gpu
 
-# ── quick sanity-check (runs silently, output suppressed) ─────────────────────
+# ── quick sanity-check ────────────────────────────────────────────────────────
 python - <<'PYEOF'
-import importlib, sys
+import importlib
 
 _mods = [
     'about','age_modifier_options','background_remover_options','common_options',
@@ -74,6 +122,7 @@ except Exception as e:
 PYEOF
 
 # ── launch ────────────────────────────────────────────────────────────────────
+echo "[INFO] Launching..."
 python facefusion.py run --execution-providers cuda
 """
 
@@ -102,13 +151,8 @@ import base64, codecs, zlib, os
 from getpass import getpass
 
 # ── access token (leave blank for public repos) ───────────────────────────────
-print("Enter your access token if the repo is private, or press Enter to skip.")
+print("Enter your GitHub fine-grained PAT (or press Enter if repo is public).")
 _tok = getpass("Token: ").strip()
-
-_repo = "https://github.com/hasnatvip/fusion.git"
-if _tok:
-    # Fine-grained PATs (github_pat_...) require x-access-token prefix
-    _repo = _repo.replace("https://", f"https://x-access-token:{_tok}@")
 
 # ── obfuscated payload (do not edit) ─────────────────────────────────────────
 _p = (
@@ -120,7 +164,8 @@ _s  = base64.b64decode(_p.encode("ascii"))          # undo outer b64
 _s  = codecs.decode(_s.decode("ascii"), "rot_13")   # undo rot-13
 _s  = base64.b64decode(_s.encode("ascii"))          # undo inner b64
 _s  = zlib.decompress(_s).decode("utf-8")           # decompress
-_s  = _s.replace("REPO_URL_PLACEHOLDER", _repo)    # inject token
+# inject raw token — bash script handles x-access-token / oauth2 fallback
+_s  = _s.replace("TOKEN_PLACEHOLDER", _tok)
 
 # ── write & run ───────────────────────────────────────────────────────────────
 _sh = "/tmp/_env_setup.sh"
