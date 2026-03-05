@@ -108,65 +108,49 @@ echo " ✅  Setup complete! Now run Cell 3 to launch the UI."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 """
 
-bash_script_launch = r"""#!/usr/bin/env bash
-# NO set -e — we want to see full error output even on failure
-cd /content/workspace
+# Python launch script — run directly, bypassing bash argument quoting issues
+python_launch_script = r"""
+import subprocess, sys, os, re, pathlib
 
-echo "[CHECK] Working directory : $(pwd)"
-echo "[CHECK] Python            : $(python3 --version 2>&1)"
-echo "[CHECK] GPU               : $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'no GPU')"
+os.chdir('/content/workspace')
 
-# ── verify onnxruntime ────────────────────────────────────────────────────────
-python3 -c "from onnxruntime import InferenceSession; print('[CHECK] onnxruntime      : OK')" 2>&1 || {
-    echo "[WARN] onnxruntime broken — force-reinstalling..."
-    pip uninstall -q -y onnxruntime onnxruntime-gpu 2>/dev/null || true
-    pip install -q --force-reinstall onnxruntime-gpu
-}
+print('[CHECK] cwd    :', os.getcwd())
+print('[CHECK] python :', sys.version.split()[0])
 
-# ── ensure share=True patch ───────────────────────────────────────────────────
-LAYOUT="facefusion/uis/layouts/default.py"
-python3 - <<'PYEOF'
-import re, pathlib
-p = pathlib.Path("facefusion/uis/layouts/default.py")
-src = p.read_text()
-if "share=True" not in src:
-    patched = re.sub(r'(ui\.launch\()', r'ui.launch(share=True, ', src)
-    p.write_text(patched)
-    print("[PATCH] share=True added to ui.launch()")
-else:
-    print("[CHECK] share=True         : already present")
-PYEOF
+# Patch share=True into ui layout
+p = pathlib.Path('facefusion/uis/layouts/default.py')
+if p.exists():
+    src = p.read_text()
+    if 'share=True' not in src:
+        patched = re.sub(r'(ui\.launch\()', r'ui.launch(share=True, ', src)
+        p.write_text(patched)
+        print('[PATCH] share=True added')
+    else:
+        print('[CHECK] share=True already present')
 
-echo ""
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " 🚀  Starting FaceFusion (CUDA) — Gradio URL will appear below"
-echo " ⏳  Takes 30–60 sec — look for:  Running on public URL: https://..."
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+print()
+print('━'*62)
+print(' 🚀  Starting — Gradio public URL will appear below')
+print(' ⏳  Wait 30-60 sec for:  Running on public URL: https://...')
+print('━'*62)
+sys.stdout.flush()
 
-python3 facefusion.py run \
-    --execution-providers cuda \
-    --ui-layouts default \
-    --ui-workflow instant_runner 2>&1
-EXIT_CUDA=$?
-
-if [ $EXIT_CUDA -ne 0 ]; then
-    echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo " ⚠️  CUDA launch failed (exit $EXIT_CUDA) — retrying with CPU"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    python3 facefusion.py run \
-        --execution-providers cpu \
-        --ui-layouts default \
-        --ui-workflow instant_runner 2>&1
-    EXIT_CPU=$?
-    if [ $EXIT_CPU -ne 0 ]; then
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo " ❌  Both CUDA and CPU launch failed."
-        echo "     Paste the full output above to debug."
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    fi
-fi
+# Try CUDA first (T4 GPU), fall back to CPU
+for providers in ['cuda', 'cpu']:
+    print(f'\n[TRY] execution-providers: {providers}')
+    sys.stdout.flush()
+    cmd = [
+        sys.executable, 'facefusion.py', 'run',
+        '--execution-providers', providers,
+        '--ui-layouts', 'default',
+        '--ui-workflow', 'instant_runner',
+    ]
+    result = subprocess.run(cmd, cwd='/content/workspace')
+    if result.returncode == 0:
+        break
+    print(f'[WARN] {providers} failed with exit code {result.returncode}')
+    if providers == 'cpu':
+        print('[ERROR] Both providers failed. Check output above for traceback.')
 """
 
 
@@ -188,7 +172,7 @@ def chunked_payload(payload: str) -> str:
     return '(\n    "' + '"\n    "'.join(chunks) + '"\n)'
 
 payload_setup  = obfuscate(bash_script_setup)
-payload_launch = obfuscate(bash_script_launch)
+payload_launch = obfuscate(python_launch_script)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 3. Cell sources
@@ -223,7 +207,7 @@ cell_setup_src = cell_setup_src.replace(
 )
 cell_setup_src += '\nget_ipython().system(f"bash {_sh}")\n'
 
-# ── Cell 3: Launch UI (obfuscated) ───────────────────────────────────────────
+# ── Cell 3: Launch UI — decodes & execs Python directly (no bash wrapper) ────
 cell_launch_src = r"""# ╔══════════════════════════════════════════════════════════════════╗
 # ║  STEP 2 — Launch UI  (run after setup, re-run to restart)       ║
 # ║  Wait for the  gradio.live  link printed below, then open it.   ║
@@ -238,15 +222,12 @@ _s = codecs.decode(_s.decode("ascii"), "rot_13")
 _s = base64.b64decode(_s.encode("ascii"))
 _s = zlib.decompress(_s).decode("utf-8")
 
-_sh = "/tmp/_launch.sh"
-with open(_sh, "w") as _f:
-    _f.write(_s)
-os.chmod(_sh, 0o755)
+# execute decoded Python directly — full stdout/stderr visible in Colab
+exec(compile(_s, "<launcher>", "exec"))
 """
 cell_launch_src = cell_launch_src.replace(
     "LAUNCH_PAYLOAD_HERE", chunked_payload(payload_launch)
 )
-cell_launch_src += '\nget_ipython().system(f"bash {_sh}")\n'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. Assemble the .ipynb structure
