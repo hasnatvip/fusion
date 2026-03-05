@@ -21,168 +21,171 @@ import zlib
 # ─────────────────────────────────────────────────────────────────────────────
 # 1. The real bash script that will run inside Colab
 # ─────────────────────────────────────────────────────────────────────────────
-bash_script = r"""#!/usr/bin/env bash
+bash_script_setup = r"""#!/usr/bin/env bash
 
 # ── clone & enter project ─────────────────────────────────────────────────────
 REPO_BASE="https://github.com/hasnatvip/fusion.git"
 RAW_TOKEN="TOKEN_PLACEHOLDER"
-DEST="workspace"
+DEST="/content/workspace"
 
-clone_ok=0
-
-if [ -n "$RAW_TOKEN" ]; then
-    echo "[INFO] Trying clone with x-access-token..."
-    URL1="https://x-access-token:${RAW_TOKEN}@github.com/hasnatvip/fusion.git"
-    if git clone "$URL1" "$DEST" 2>&1; then
-        clone_ok=1
+if [ -d "$DEST/.git" ]; then
+    echo "[INFO] Repo already cloned, skipping..."
+else
+    if [ -n "$RAW_TOKEN" ]; then
+        echo "[INFO] Cloning with token (x-access-token)..."
+        URL1="https://x-access-token:${RAW_TOKEN}@github.com/hasnatvip/fusion.git"
+        if ! git clone "$URL1" "$DEST" 2>&1; then
+            echo "[INFO] x-access-token failed, trying oauth2..."
+            URL2="https://oauth2:${RAW_TOKEN}@github.com/hasnatvip/fusion.git"
+            if ! git clone "$URL2" "$DEST" 2>&1; then
+                echo ""
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo " ❌  CLONE FAILED (403) — Token permission issue"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                echo " Fix steps:"
+                echo "  1. github.com/settings/tokens → edit your token"
+                echo "  2. Repository access → Only select repos → add: hasnatvip/fusion"
+                echo "  3. Permissions → Contents → Read-only"
+                echo "  4. Save & regenerate, paste new token, re-run"
+                echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+                exit 1
+            fi
+        fi
     else
-        echo "[INFO] x-access-token failed, trying oauth2..."
-        URL2="https://oauth2:${RAW_TOKEN}@github.com/hasnatvip/fusion.git"
-        if git clone "$URL2" "$DEST" 2>&1; then
-            clone_ok=1
-        else
-            echo ""
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo " ❌  CLONE FAILED (403) — Token permission issue"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-            echo " Your token was accepted by GitHub but has no READ access"
-            echo " to this repository. Fix it here:"
-            echo ""
-            echo "  1. Go to: https://github.com/settings/tokens"
-            echo "  2. Edit / regenerate your token"
-            echo "  3. Under 'Repository access' → choose 'Only select repos'"
-            echo "     and add:  hasnatvip/fusion"
-            echo "  4. Under 'Permissions → Contents' → set to 'Read-only'"
-            echo "  5. Save, copy the new token, re-run this cell"
-            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "[INFO] No token — trying public clone..."
+        if ! git clone "$REPO_BASE" "$DEST" 2>&1; then
+            echo "❌  Repo is private. Re-run and enter a GitHub PAT."
             exit 1
         fi
-    fi
-else
-    echo "[INFO] No token provided, trying public clone..."
-    if git clone "$REPO_BASE" "$DEST" 2>&1; then
-        clone_ok=1
-    else
-        echo ""
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo " ❌  CLONE FAILED — Repo is private, token required"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo " Re-run this cell and enter a GitHub fine-grained PAT"
-        echo " with Contents: Read-only for hasnatvip/fusion"
-        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        exit 1
     fi
 fi
 
 cd "$DEST"
 
-# ── Python dependencies ───────────────────────────────────────────────────────
-echo "[INFO] Installing dependencies..."
+# ── patch Gradio launch() to use share=True (required for Colab) ──────────────
+LAYOUT="facefusion/uis/layouts/default.py"
+if grep -q "share=True" "$LAYOUT" 2>/dev/null; then
+    echo "[INFO] share=True already patched."
+else
+    sed -i 's/ui\.launch(\(.*\)inbrowser/ui.launch(\1share=True, inbrowser/g' "$LAYOUT" 2>/dev/null || \
+    python3 - <<'PYEOF'
+import re, pathlib
+p = pathlib.Path("facefusion/uis/layouts/default.py")
+src = p.read_text()
+patched = re.sub(
+    r'ui\.launch\(([^)]*?)inbrowser',
+    r'ui.launch(\1share=True, inbrowser',
+    src
+)
+p.write_text(patched)
+print("[INFO] Patched ui.launch() with share=True")
+PYEOF
+fi
+
+# ── install dependencies ──────────────────────────────────────────────────────
+echo "[INFO] Installing dependencies (this takes ~3 min)..."
 pip install -q -r requirements.txt
 pip install -q onnx==1.19.1
 pip uninstall -q -y onnxruntime 2>/dev/null || true
 pip install -q onnxruntime-gpu
 
-# ── quick sanity-check ────────────────────────────────────────────────────────
-python - <<'PYEOF'
-import importlib
-
-_mods = [
-    'about','age_modifier_options','background_remover_options','common_options',
-    'deep_swapper_options','download','execution','execution_thread_count',
-    'expression_restorer_options','face_debugger_options','face_detector',
-    'face_editor_options','face_enhancer_options','face_landmarker',
-    'face_masker','face_selector','face_swapper_options','frame_colorizer_options',
-    'frame_enhancer_options','instant_runner','job_manager','job_runner',
-    'lip_syncer_options','memory','output','output_options','preview',
-    'preview_options','processors','source','target','temp_frame',
-    'terminal','trim_frame','ui_workflow','voice_extractor','wan_local_generator',
-]
-
-ok, fail = [], []
-for m in _mods:
-    try:
-        importlib.import_module('facefusion.uis.components.' + m)
-        ok.append(m)
-    except Exception as e:
-        fail.append((m, str(e)))
-
-if fail:
-    print(f"[WARN] {len(fail)} component(s) failed to import:")
-    for n, err in fail:
-        print(f"  • {n}: {err}")
-else:
-    print(f"[OK] all {len(ok)} components imported successfully")
-
-try:
-    import facefusion.uis.layouts.default
-    print("[OK] ui layout loaded")
-except Exception as e:
-    print(f"[WARN] ui layout: {e}")
-PYEOF
-
-# ── launch ────────────────────────────────────────────────────────────────────
-echo "[INFO] Launching..."
-python facefusion.py run --execution-providers cuda
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " ✅  Setup complete! Now run Cell 3 to launch the UI."
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 """
 
-# ─────────────────────────────────────────────────────────────────────────────
-# 2. Multi-layer obfuscation
-# ─────────────────────────────────────────────────────────────────────────────
-raw_bytes   = bash_script.encode("utf-8")
-compressed  = zlib.compress(raw_bytes, level=9)          # layer 0: compress
-b64_once    = base64.b64encode(compressed).decode("ascii")  # layer 1: base64
-rot13_str   = codecs.encode(b64_once, "rot_13")             # layer 2: rot-13
-b64_twice   = base64.b64encode(rot13_str.encode("ascii")).decode("ascii")  # layer 3: base64
+bash_script_launch = r"""#!/usr/bin/env bash
+cd /content/workspace
 
-# Split into 80-char chunks so the string literal doesn't look like one big blob
+echo ""
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " 🚀  Launching UI — watch for the gradio.live URL below"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+python facefusion.py run \
+    --execution-providers cuda \
+    --ui-layouts default \
+    --ui-workflow instant_runner
+"""
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. Multi-layer obfuscation helper
+# ─────────────────────────────────────────────────────────────────────────────
+def obfuscate(script: str) -> str:
+    raw       = script.encode("utf-8")
+    compressed = zlib.compress(raw, level=9)
+    b64_once   = base64.b64encode(compressed).decode("ascii")
+    rot13_str  = codecs.encode(b64_once, "rot_13")
+    b64_twice  = base64.b64encode(rot13_str.encode("ascii")).decode("ascii")
+    return b64_twice
+
 CHUNK = 80
-chunks = [b64_twice[i:i+CHUNK] for i in range(0, len(b64_twice), CHUNK)]
-payload_literal = '"\\\n"'.join(chunks)   # Python multi-line string trick
+
+def chunked_payload(payload: str) -> str:
+    chunks = [payload[i:i+CHUNK] for i in range(0, len(payload), CHUNK)]
+    return '(\n    "' + '"\n    "'.join(chunks) + '"\n)'
+
+payload_setup  = obfuscate(bash_script_setup)
+payload_launch = obfuscate(bash_script_launch)
 
 # ─────────────────────────────────────────────────────────────────────────────
-# 3. Build the Colab cell source  (no FaceFusion strings visible)
+# 3. Cell sources
 # ─────────────────────────────────────────────────────────────────────────────
-cell_source = r"""# ╔══════════════════════════════════════════════════════════════╗
-# ║  Environment Setup — run this cell once, then wait for GPU  ║
-# ╚══════════════════════════════════════════════════════════════╝
+
+# ── Cell 2: Setup + Install (obfuscated, asks for token) ─────────────────────
+cell_setup_src = r"""# ╔══════════════════════════════════════════════════════════════════╗
+# ║  STEP 1 — Setup & Install  (run once, ~3 min)                   ║
+# ╚══════════════════════════════════════════════════════════════════╝
 
 import base64, codecs, zlib, os
 from getpass import getpass
 
-# ── access token (leave blank for public repos) ───────────────────────────────
 print("Enter your GitHub fine-grained PAT (or press Enter if repo is public).")
 _tok = getpass("Token: ").strip()
 
-# ── obfuscated payload (do not edit) ─────────────────────────────────────────
-_p = (
-    "PAYLOAD_HERE"
-)
+_p = SETUP_PAYLOAD_HERE
 
-# ── decode: base64 → rot-13 → base64 → decompress ────────────────────────────
-_s  = base64.b64decode(_p.encode("ascii"))          # undo outer b64
-_s  = codecs.decode(_s.decode("ascii"), "rot_13")   # undo rot-13
-_s  = base64.b64decode(_s.encode("ascii"))          # undo inner b64
-_s  = zlib.decompress(_s).decode("utf-8")           # decompress
-# inject raw token — bash script handles x-access-token / oauth2 fallback
-_s  = _s.replace("TOKEN_PLACEHOLDER", _tok)
+_s = base64.b64decode(_p.encode("ascii"))
+_s = codecs.decode(_s.decode("ascii"), "rot_13")
+_s = base64.b64decode(_s.encode("ascii"))
+_s = zlib.decompress(_s).decode("utf-8")
+_s = _s.replace("TOKEN_PLACEHOLDER", _tok)
 
-# ── write & run ───────────────────────────────────────────────────────────────
-_sh = "/tmp/_env_setup.sh"
+_sh = "/tmp/_setup.sh"
 with open(_sh, "w") as _f:
     _f.write(_s)
 os.chmod(_sh, 0o755)
 """
+cell_setup_src = cell_setup_src.replace(
+    "SETUP_PAYLOAD_HERE", chunked_payload(payload_setup)
+)
+cell_setup_src += '\nget_ipython().system(f"bash {_sh}")\n'
 
-# Replace the PAYLOAD_HERE placeholder with the real (chunked) payload
-# We embed it as a tuple of joined strings for readability
-chunks_for_cell = [b64_twice[i:i+CHUNK] for i in range(0, len(b64_twice), CHUNK)]
-payload_joined  = '"\n    "'.join(chunks_for_cell)
-cell_source = cell_source.replace('"PAYLOAD_HERE"',
-    '(\n    "' + payload_joined + '"\n)')
+# ── Cell 3: Launch UI (obfuscated) ───────────────────────────────────────────
+cell_launch_src = r"""# ╔══════════════════════════════════════════════════════════════════╗
+# ║  STEP 2 — Launch UI  (run after setup, re-run to restart)       ║
+# ║  Wait for the  gradio.live  link printed below, then open it.   ║
+# ╚══════════════════════════════════════════════════════════════════╝
 
-# Add the final execution line (kept as shell magic so it streams output)
-cell_source += '\nget_ipython().system(f"bash {_sh}")\n'
+import base64, codecs, zlib, os
+
+_p = LAUNCH_PAYLOAD_HERE
+
+_s = base64.b64decode(_p.encode("ascii"))
+_s = codecs.decode(_s.decode("ascii"), "rot_13")
+_s = base64.b64decode(_s.encode("ascii"))
+_s = zlib.decompress(_s).decode("utf-8")
+
+_sh = "/tmp/_launch.sh"
+with open(_sh, "w") as _f:
+    _f.write(_s)
+os.chmod(_sh, 0o755)
+"""
+cell_launch_src = cell_launch_src.replace(
+    "LAUNCH_PAYLOAD_HERE", chunked_payload(payload_launch)
+)
+cell_launch_src += '\nget_ipython().system(f"bash {_sh}")\n'
 
 # ─────────────────────────────────────────────────────────────────────────────
 # 4. Assemble the .ipynb structure
@@ -190,7 +193,6 @@ cell_source += '\nget_ipython().system(f"bash {_sh}")\n'
 def _lines(src: str):
     """Convert a string into the JSON line-array format Colab expects."""
     lines = src.splitlines(keepends=True)
-    # last line must NOT have a trailing newline in the Colab format
     if lines and lines[-1].endswith("\n"):
         lines[-1] = lines[-1].rstrip("\n")
     return lines
@@ -220,17 +222,25 @@ notebook = {
             "metadata": {"id": "cell_gpu_check"},
             "outputs": [],
             "source": _lines(
-                "# Verify GPU is available\n"
+                "# ── Verify T4 GPU is attached ────────────────────────────\n"
                 "!nvidia-smi\n"
             )
         },
-        # ── Cell 1: main obfuscated launcher ──────────────────────────────
+        # ── Cell 1: Setup & Install ────────────────────────────────────────
         {
             "cell_type": "code",
             "execution_count": None,
-            "metadata": {"id": "cell_main_launcher"},
+            "metadata": {"id": "cell_setup"},
             "outputs": [],
-            "source": _lines(cell_source)
+            "source": _lines(cell_setup_src)
+        },
+        # ── Cell 2: Launch Gradio UI ───────────────────────────────────────
+        {
+            "cell_type": "code",
+            "execution_count": None,
+            "metadata": {"id": "cell_launch_ui"},
+            "outputs": [],
+            "source": _lines(cell_launch_src)
         },
     ]
 }
@@ -242,6 +252,10 @@ output_path = "colab_launcher.ipynb"
 with open(output_path, "w", encoding="utf-8") as fh:
     json.dump(notebook, fh, indent=2, ensure_ascii=False)
 
-print(f"✅  {output_path} written successfully.")
-print(f"    Payload size  : {len(b64_twice):,} chars  ({len(chunks_for_cell)} chunks)")
-print(f"    Obfuscation   : zlib → base64 → rot13 → base64")
+n_setup  = len([payload_setup[i:i+CHUNK]  for i in range(0, len(payload_setup),  CHUNK)])
+n_launch = len([payload_launch[i:i+CHUNK] for i in range(0, len(payload_launch), CHUNK)])
+print(f"✅  {output_path} written ({3} cells)")
+print(f"    Setup  payload : {len(payload_setup):,} chars  ({n_setup} chunks)")
+print(f"    Launch payload : {len(payload_launch):,} chars  ({n_launch} chunks)")
+print(f"    Obfuscation    : zlib → base64 → rot13 → base64")
+
