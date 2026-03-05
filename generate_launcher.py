@@ -25,6 +25,7 @@ bash_script = r"""#!/usr/bin/env bash
 set -e
 
 # ── clone & enter project ────────────────────────────────────────────────────
+# REPO_URL_PLACEHOLDER already contains x-access-token:{PAT}@ for fine-grained PATs
 git clone REPO_URL_PLACEHOLDER workspace
 cd workspace
 
@@ -106,7 +107,8 @@ _tok = getpass("Token: ").strip()
 
 _repo = "https://github.com/hasnatvip/fusion.git"
 if _tok:
-    _repo = _repo.replace("https://", f"https://{_tok}@")
+    # Fine-grained PATs (github_pat_...) require x-access-token prefix
+    _repo = _repo.replace("https://", f"https://x-access-token:{_tok}@")
 
 # ── obfuscated payload (do not edit) ─────────────────────────────────────────
 _p = (
