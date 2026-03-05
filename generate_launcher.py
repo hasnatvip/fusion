@@ -109,54 +109,64 @@ echo "━━━━━━━━━━━━━━━━━━━━━━━━�
 """
 
 bash_script_launch = r"""#!/usr/bin/env bash
-set -e
+# NO set -e — we want to see full error output even on failure
 cd /content/workspace
 
-echo "[CHECK] Working directory: $(pwd)"
-echo "[CHECK] Python: $(python3 --version 2>&1)"
-echo "[CHECK] GPU:    $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'no GPU')"
+echo "[CHECK] Working directory : $(pwd)"
+echo "[CHECK] Python            : $(python3 --version 2>&1)"
+echo "[CHECK] GPU               : $(nvidia-smi --query-gpu=name --format=csv,noheader 2>/dev/null || echo 'no GPU')"
 
-# ── verify onnxruntime is importable ──────────────────────────────────────────
-python3 -c "from onnxruntime import InferenceSession; print('[CHECK] onnxruntime OK')" 2>&1 || {
-    echo "[ERROR] onnxruntime broken — re-installing..."
+# ── verify onnxruntime ────────────────────────────────────────────────────────
+python3 -c "from onnxruntime import InferenceSession; print('[CHECK] onnxruntime      : OK')" 2>&1 || {
+    echo "[WARN] onnxruntime broken — force-reinstalling..."
     pip uninstall -q -y onnxruntime onnxruntime-gpu 2>/dev/null || true
     pip install -q --force-reinstall onnxruntime-gpu
-    python3 -c "from onnxruntime import InferenceSession; print('[CHECK] onnxruntime OK after reinstall')"
 }
 
-# ── ensure share=True is in launch call ───────────────────────────────────────
+# ── ensure share=True patch ───────────────────────────────────────────────────
 LAYOUT="facefusion/uis/layouts/default.py"
-if ! grep -q "share=True" "$LAYOUT" 2>/dev/null; then
-    echo "[PATCH] Adding share=True to ui.launch()..."
-    python3 - <<'PYEOF'
+python3 - <<'PYEOF'
 import re, pathlib
 p = pathlib.Path("facefusion/uis/layouts/default.py")
 src = p.read_text()
 if "share=True" not in src:
-    patched = re.sub(
-        r'(ui\.launch\()',
-        r'ui.launch(share=True, ',
-        src
-    )
+    patched = re.sub(r'(ui\.launch\()', r'ui.launch(share=True, ', src)
     p.write_text(patched)
-    print("[PATCH] share=True added")
+    print("[PATCH] share=True added to ui.launch()")
 else:
-    print("[PATCH] share=True already present")
+    print("[CHECK] share=True         : already present")
 PYEOF
-else
-    echo "[CHECK] share=True already patched"
-fi
 
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " 🚀  Starting FaceFusion — Gradio public URL will appear below"
-echo " ⏳  May take 30–60 seconds to fully load..."
+echo " 🚀  Starting FaceFusion (CUDA) — Gradio URL will appear below"
+echo " ⏳  Takes 30–60 sec — look for:  Running on public URL: https://..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 python3 facefusion.py run \
     --execution-providers cuda \
     --ui-layouts default \
     --ui-workflow instant_runner 2>&1
+EXIT_CUDA=$?
+
+if [ $EXIT_CUDA -ne 0 ]; then
+    echo ""
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo " ⚠️  CUDA launch failed (exit $EXIT_CUDA) — retrying with CPU"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    python3 facefusion.py run \
+        --execution-providers cpu \
+        --ui-layouts default \
+        --ui-workflow instant_runner 2>&1
+    EXIT_CPU=$?
+    if [ $EXIT_CPU -ne 0 ]; then
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo " ❌  Both CUDA and CPU launch failed."
+        echo "     Paste the full output above to debug."
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    fi
+fi
 """
 
 
