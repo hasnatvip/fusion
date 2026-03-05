@@ -163,7 +163,7 @@ if p_prog.exists():
 # ── quick argument sanity-check ───────────────────────────────────────────────
 print('\n[DIAG] Running facefusion.py run --help to verify args...')
 sys.stdout.flush()
-rc_help = run_and_stream([sys.executable, 'facefusion.py', 'run', '--help'])
+rc_help = run_and_stream([sys.executable, 'facefusion.py', 'run', '--config-path', '/dev/null', '--help'])
 if rc_help not in (0, 1):      # argparse --help exits 0 or 1 normally
     print(f'[DIAG] --help returned {rc_help} — check output above')
 
@@ -180,6 +180,7 @@ for provider in ['cuda', 'cpu']:
     sys.stdout.flush()
     cmd = [
         sys.executable, 'facefusion.py', 'run',
+        '--config-path', '/dev/null',
         '--execution-providers', provider,
         '--ui-layouts', 'default',
         '--ui-workflow', 'instant_runner',
