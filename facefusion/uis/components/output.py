@@ -18,10 +18,10 @@ def render() -> None:
 	global OUTPUT_VIDEO
 
 	if not state_manager.get_item('output_path'):
-		downloads_directory = Path.home().joinpath('Downloads')
+		documents_directory = Path.home().joinpath('Documents')
 
-		if downloads_directory.exists():
-			state_manager.set_item('output_path', downloads_directory)
+		if documents_directory.exists():
+			state_manager.set_item('output_path', documents_directory)
 		else:
 			state_manager.set_item('output_path', tempfile.gettempdir())
 	OUTPUT_PATH_TEXTBOX = gradio.Textbox(

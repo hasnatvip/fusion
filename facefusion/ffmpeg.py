@@ -114,24 +114,7 @@ def extract_frames(target_path : str, temp_video_resolution : Resolution, temp_v
 		ffmpeg_builder.set_input(target_path),
 		ffmpeg_builder.set_media_resolution(pack_resolution(temp_video_resolution)),
 		ffmpeg_builder.set_frame_quality(0),
-		ffmpeg_builder.select_frame_range(trim_frame_start, trim_frame_end, temp_video_fps),
-		ffmpeg_builder.prevent_frame_drop(),
-		ffmpeg_builder.set_output(temp_frames_pattern)
-	)
-
-	with tqdm(total = extract_frame_total, desc = translator.get('extracting'), unit = 'frame', ascii = ' =', disable = state_manager.get_item('log_level') in [ 'warn', 'error' ]) as progress:
-		process = run_ffmpeg_with_progress(commands, partial(update_progress, progress))
-		return process.returncode == 0
-
-
-def repeat_image(target_path : str, temp_video_resolution : Resolution, temp_video_fps : Fps, trim_frame_start : int, trim_frame_end : int) -> bool:
-	extract_frame_total = trim_frame_end - trim_frame_start
-	temp_frames_pattern = get_temp_frames_pattern(target_path, '%08d')
-	commands = ffmpeg_builder.chain(
-		[ '-loop', '1' ],
-		ffmpeg_builder.set_input(target_path),
-		ffmpeg_builder.set_media_resolution(pack_resolution(temp_video_resolution)),
-		ffmpeg_builder.set_frame_quality(0),
+		ffmpeg_builder.enforce_pixel_format('rgb24'),
 		ffmpeg_builder.select_frame_range(trim_frame_start, trim_frame_end, temp_video_fps),
 		ffmpeg_builder.prevent_frame_drop(),
 		ffmpeg_builder.set_output(temp_frames_pattern)
@@ -261,7 +244,8 @@ def merge_video(target_path : str, temp_video_fps : Fps, output_video_resolution
 
 
 def concat_video(output_path : str, temp_output_paths : List[str]) -> bool:
-	concat_video_path = tempfile.mktemp()
+	file_descriptor, concat_video_path = tempfile.mkstemp()
+	os.close(file_descriptor)
 
 	with open(concat_video_path, 'w') as concat_video_file:
 		for temp_output_path in temp_output_paths:

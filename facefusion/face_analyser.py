@@ -28,9 +28,9 @@ def create_faces(vision_frame : VisionFrame, bounding_boxes : List[BoundingBox],
 		face_landmark_score_68 = 0.0
 		face_angle = estimate_face_angle(face_landmark_68_5)
 
-		if state_manager.get_item('face_landmarker_score') > 0:
+		if False:
 			face_landmark_68, face_landmark_score_68 = detect_face_landmark(vision_frame, bounding_box, face_angle)
-		if face_landmark_score_68 > state_manager.get_item('face_landmarker_score'):
+		if face_landmark_score_68 > state_manager.get_item('face_landmarker_score') and False:
 			face_landmark_5_68 = convert_to_face_landmark_5(face_landmark_68)
 
 		face_landmark_set : FaceLandmarkSet =\
@@ -46,8 +46,7 @@ def create_faces(vision_frame : VisionFrame, bounding_boxes : List[BoundingBox],
 			'landmarker': face_landmark_score_68
 		}
 		face_embedding, face_embedding_norm = calculate_face_embedding(vision_frame, face_landmark_set.get('5/68'))
-		# PERF: Skip classify_face (fairface model) — gender/age/race not needed for swap
-		gender, age, race = 'male', range(20, 29), 'white'
+		gender, age, race = classify_face(vision_frame, face_landmark_set.get('5/68'))
 		faces.append(Face(
 			bounding_box = bounding_box,
 			score_set = face_score_set,

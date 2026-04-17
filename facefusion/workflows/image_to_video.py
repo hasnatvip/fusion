@@ -6,16 +6,15 @@ from tqdm import tqdm
 
 from facefusion import ffmpeg
 from facefusion import logger, process_manager, state_manager, translator, video_manager
-from facefusion import audio
 from facefusion.audio import create_empty_audio_frame, get_audio_frame, get_voice_frame
 from facefusion.common_helper import get_first
 from facefusion.content_analyser import analyse_video
-from facefusion.filesystem import filter_audio_paths, is_image, is_video
+from facefusion.filesystem import filter_audio_paths, is_video
 from facefusion.processors.core import get_processors_modules
 from facefusion.temp_helper import clear_temp_directory, create_temp_directory, move_temp_file, resolve_temp_frame_paths
 from facefusion.time_helper import calculate_end_time
 from facefusion.types import ErrorCode
-from facefusion.vision import conditional_merge_vision_mask, detect_image_resolution, detect_video_resolution, extract_vision_mask, pack_resolution, read_static_image, read_static_images, read_static_video_frame, restrict_image_resolution, restrict_trim_frame, restrict_video_fps, restrict_video_resolution, scale_resolution, write_image
+from facefusion.vision import conditional_merge_vision_mask, detect_video_resolution, extract_vision_mask, pack_resolution, read_static_image, read_static_images, read_static_video_frame, restrict_trim_frame, restrict_video_fps, restrict_video_resolution, scale_resolution, write_image
 from facefusion.workflows.core import is_process_stopping
 
 
@@ -32,7 +31,7 @@ def process(start_time : float) -> ErrorCode:
 	process_manager.start()
 
 	for task in tasks:
-		error_code = task() # type:ignore[operator]
+		error_code = task() #type:ignore[operator]
 
 		if error_code > 0:
 			process_manager.end()
@@ -43,21 +42,10 @@ def process(start_time : float) -> ErrorCode:
 
 
 def setup() -> ErrorCode:
-	target_path = state_manager.get_item('target_path')
+	trim_frame_start, trim_frame_end = restrict_trim_frame(state_manager.get_item('target_path'), state_manager.get_item('trim_frame_start'), state_manager.get_item('trim_frame_end'))
 
-	if is_image(target_path):
-		source_audio_path = get_first(filter_audio_paths(state_manager.get_item('source_paths')))
-		output_video_fps = state_manager.get_item('output_video_fps') or 25.0
-		state_manager.set_item('output_video_fps', output_video_fps)
-
-		if source_audio_path:
-			audio_frames = audio.read_static_audio(source_audio_path, output_video_fps)
-			state_manager.set_item('trim_frame_end', len(audio_frames))
-		else:
-			return 1
-	if is_video(target_path):
-		# PERF: Skipped analyse_video (NSFW check) — content_analyser returns False unconditionally
-		pass
+	if analyse_video(state_manager.get_item('target_path'), trim_frame_start, trim_frame_end):
+		return 3
 
 	logger.debug(translator.get('clearing_temp'), __name__)
 	clear_temp_directory(state_manager.get_item('target_path'))
@@ -67,38 +55,19 @@ def setup() -> ErrorCode:
 
 
 def extract_frames() -> ErrorCode:
-	target_path = state_manager.get_item('target_path')
+	trim_frame_start, trim_frame_end = restrict_trim_frame(state_manager.get_item('target_path'), state_manager.get_item('trim_frame_start'), state_manager.get_item('trim_frame_end'))
+	output_video_resolution = scale_resolution(detect_video_resolution(state_manager.get_item('target_path')), state_manager.get_item('output_video_scale'))
+	temp_video_resolution = restrict_video_resolution(state_manager.get_item('target_path'), output_video_resolution)
+	temp_video_fps = restrict_video_fps(state_manager.get_item('target_path'), state_manager.get_item('output_video_fps'))
+	logger.info(translator.get('extracting_frames').format(resolution=pack_resolution(temp_video_resolution), fps=temp_video_fps), __name__)
 
-	if is_image(target_path):
-		output_video_resolution = scale_resolution(detect_image_resolution(target_path), state_manager.get_item('output_video_scale'))
-		temp_video_resolution = restrict_image_resolution(target_path, output_video_resolution)
-		temp_video_fps = state_manager.get_item('output_video_fps')
-		trim_frame_start = 0
-		trim_frame_end = state_manager.get_item('trim_frame_end')
-		logger.info(translator.get('extracting_frames').format(resolution = pack_resolution(temp_video_resolution), fps = temp_video_fps), __name__)
-
-		if ffmpeg.repeat_image(target_path, temp_video_resolution, temp_video_fps, trim_frame_start, trim_frame_end):
-			logger.debug(translator.get('extracting_frames_succeeded'), __name__)
-		else:
-			if is_process_stopping():
-				return 4
-			logger.error(translator.get('extracting_frames_failed'), __name__)
-			return 1
-
-	if is_video(target_path):
-		trim_frame_start, trim_frame_end = restrict_trim_frame(target_path, state_manager.get_item('trim_frame_start'), state_manager.get_item('trim_frame_end'))
-		output_video_resolution = scale_resolution(detect_video_resolution(target_path), state_manager.get_item('output_video_scale'))
-		temp_video_resolution = restrict_video_resolution(target_path, output_video_resolution)
-		temp_video_fps = restrict_video_fps(target_path, state_manager.get_item('output_video_fps'))
-		logger.info(translator.get('extracting_frames').format(resolution = pack_resolution(temp_video_resolution), fps = temp_video_fps), __name__)
-
-		if ffmpeg.extract_frames(target_path, temp_video_resolution, temp_video_fps, trim_frame_start, trim_frame_end):
-			logger.debug(translator.get('extracting_frames_succeeded'), __name__)
-		else:
-			if is_process_stopping():
-				return 4
-			logger.error(translator.get('extracting_frames_failed'), __name__)
-			return 1
+	if ffmpeg.extract_frames(state_manager.get_item('target_path'), temp_video_resolution, temp_video_fps, trim_frame_start, trim_frame_end):
+		logger.debug(translator.get('extracting_frames_succeeded'), __name__)
+	else:
+		if is_process_stopping():
+			return 4
+		logger.error(translator.get('extracting_frames_failed'), __name__)
+		return 1
 	return 0
 
 
@@ -137,18 +106,9 @@ def process_video() -> ErrorCode:
 
 
 def merge_frames() -> ErrorCode:
-	target_path = state_manager.get_item('target_path')
-
-	if is_image(target_path):
-		output_video_resolution = scale_resolution(detect_image_resolution(target_path), state_manager.get_item('output_video_scale'))
-		temp_video_fps = state_manager.get_item('output_video_fps')
-		trim_frame_start = 0
-		trim_frame_end = state_manager.get_item('trim_frame_end')
-
-	if is_video(target_path):
-		trim_frame_start, trim_frame_end = restrict_trim_frame(target_path, state_manager.get_item('trim_frame_start'), state_manager.get_item('trim_frame_end'))
-		output_video_resolution = scale_resolution(detect_video_resolution(target_path), state_manager.get_item('output_video_scale'))
-		temp_video_fps = restrict_video_fps(target_path, state_manager.get_item('output_video_fps'))
+	trim_frame_start, trim_frame_end = restrict_trim_frame(state_manager.get_item('target_path'), state_manager.get_item('trim_frame_start'), state_manager.get_item('trim_frame_end'))
+	output_video_resolution = scale_resolution(detect_video_resolution(state_manager.get_item('target_path')), state_manager.get_item('output_video_scale'))
+	temp_video_fps = restrict_video_fps(state_manager.get_item('target_path'), state_manager.get_item('output_video_fps'))
 
 	logger.info(translator.get('merging_video').format(resolution = pack_resolution(output_video_resolution), fps = state_manager.get_item('output_video_fps')), __name__)
 	if ffmpeg.merge_video(state_manager.get_item('target_path'), temp_video_fps, output_video_resolution, state_manager.get_item('output_video_fps'), trim_frame_start, trim_frame_end):
@@ -162,14 +122,7 @@ def merge_frames() -> ErrorCode:
 
 
 def restore_audio() -> ErrorCode:
-	target_path = state_manager.get_item('target_path')
-
-	if is_image(target_path):
-		trim_frame_start = 0
-		trim_frame_end = state_manager.get_item('trim_frame_end')
-
-	if is_video(target_path):
-		trim_frame_start, trim_frame_end = restrict_trim_frame(target_path, state_manager.get_item('trim_frame_start'), state_manager.get_item('trim_frame_end'))
+	trim_frame_start, trim_frame_end = restrict_trim_frame(state_manager.get_item('target_path'), state_manager.get_item('trim_frame_start'), state_manager.get_item('trim_frame_end'))
 
 	if state_manager.get_item('output_audio_volume') == 0:
 		logger.info(translator.get('skipping_audio'), __name__)

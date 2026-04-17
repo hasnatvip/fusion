@@ -1,11 +1,11 @@
-
+import inspect
 import itertools
 import shutil
 import signal
 import sys
 from time import time
 
-from facefusion import benchmarker, cli_helper, content_analyser, face_classifier, face_detector, face_landmarker, face_masker, face_recognizer, logger, state_manager, translator, voice_extractor
+from facefusion import benchmarker, cli_helper, content_analyser, face_classifier, face_detector, face_landmarker, face_masker, face_recognizer, hash_helper, logger, state_manager, translator, voice_extractor
 from facefusion.args import apply_args, collect_job_args, reduce_job_args, reduce_step_args
 from facefusion.download import conditional_download_hashes, conditional_download_sources
 from facefusion.exit_helper import hard_exit, signal_exit
@@ -117,6 +117,9 @@ def common_pre_check() -> bool:
 		face_recognizer,
 		voice_extractor
 	]
+
+	content_analyser_content = inspect.getsource(content_analyser).encode()
+	content_analyser_hash = hash_helper.create_hash(content_analyser_content)
 
 	return all(module.pre_check() for module in common_modules)
 
@@ -324,9 +327,10 @@ def process_step(job_id : str, step_index : int, step_args : Args) -> bool:
 	apply_args(step_args, state_manager.set_item)
 
 	logger.info(translator.get('processing_step').format(step_current = step_index + 1, step_total = step_total), __name__)
-	# PERF: Skip repeated pre_checks — they already ran at startup
-	error_code = conditional_process()
-	return error_code == 0
+	if common_pre_check() and processors_pre_check():
+		error_code = conditional_process()
+		return error_code == 0
+	return False
 
 
 def conditional_process() -> ErrorCode:
@@ -337,8 +341,6 @@ def conditional_process() -> ErrorCode:
 			return 2
 
 	if is_image(state_manager.get_item('target_path')):
-		if is_video(state_manager.get_item('output_path')):
-			return image_to_video.process(start_time)
 		return image_to_image.process(start_time)
 	if is_video(state_manager.get_item('target_path')):
 		return image_to_video.process(start_time)

@@ -5,8 +5,14 @@ __pycache__
 .idea
 .jobs
 .vscode
-facefusion-env/
+.venv
 venv/
+env/
+*-env/
+*.log
 .DS_Store
-*.zip
-*.pyc
+.env
+.ipynb_checkpoints
+temp/
+out/
+.python-version

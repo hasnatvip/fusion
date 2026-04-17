@@ -540,8 +540,8 @@ def pre_process(mode : ProcessMode) -> bool:
 		return False
 
 	source_image_paths = filter_image_paths(state_manager.get_item('source_paths'))
-	source_frames = read_static_images(source_image_paths)
-	source_faces = get_many_faces(source_frames)
+	source_vision_frames = read_static_images(source_image_paths)
+	source_faces = get_many_faces(source_vision_frames)
 
 	if not get_one_face(source_faces):
 		logger.error(translator.get('no_source_face_detected') + translator.get('exclamation_mark'), __name__)
@@ -562,10 +562,6 @@ def pre_process(mode : ProcessMode) -> bool:
 	return True
 
 
-
-SOURCE_FACE_CACHE = {}
-
-
 def post_process() -> None:
 	read_static_image.cache_clear()
 	read_static_video_frame.cache_clear()
@@ -580,7 +576,6 @@ def post_process() -> None:
 		face_landmarker.clear_inference_pool()
 		face_masker.clear_inference_pool()
 		face_recognizer.clear_inference_pool()
-	SOURCE_FACE_CACHE.clear()
 
 
 def swap_face(source_face : Face, target_face : Face, temp_vision_frame : VisionFrame) -> VisionFrame:
@@ -749,11 +744,6 @@ def normalize_crop_frame(crop_vision_frame : VisionFrame) -> VisionFrame:
 
 
 def extract_source_face(source_vision_frames : List[VisionFrame]) -> Optional[Face]:
-	source_paths = tuple(state_manager.get_item('source_paths'))
-
-	if source_paths in SOURCE_FACE_CACHE:
-		return SOURCE_FACE_CACHE.get(source_paths)
-
 	source_faces = []
 
 	if source_vision_frames:
@@ -764,9 +754,7 @@ def extract_source_face(source_vision_frames : List[VisionFrame]) -> Optional[Fa
 			if temp_faces:
 				source_faces.append(get_first(temp_faces))
 
-	source_face = get_average_face(source_faces)
-	SOURCE_FACE_CACHE[source_paths] = source_face
-	return source_face
+	return get_average_face(source_faces)
 
 
 def process_frame(inputs : FaceSwapperInputs) -> ProcessorOutputs:
@@ -784,4 +772,3 @@ def process_frame(inputs : FaceSwapperInputs) -> ProcessorOutputs:
 			temp_vision_frame = swap_face(source_face, target_face, temp_vision_frame)
 
 	return temp_vision_frame, temp_vision_mask
-

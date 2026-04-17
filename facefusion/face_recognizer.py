@@ -1,16 +1,14 @@
 from functools import lru_cache
-from typing import List, Tuple
+from typing import Tuple
 
 import numpy
 
-from facefusion import inference_manager, state_manager
-from facefusion.common_helper import is_macos
+from facefusion import inference_manager
 from facefusion.download import conditional_download_hashes, conditional_download_sources, resolve_download_url
-from facefusion.execution import has_execution_provider
 from facefusion.face_helper import warp_face_by_face_landmark_5
 from facefusion.filesystem import resolve_relative_path
 from facefusion.thread_helper import conditional_thread_semaphore
-from facefusion.types import DownloadScope, Embedding, ExecutionProvider, FaceLandmark5, InferencePool, ModelOptions, ModelSet, VisionFrame
+from facefusion.types import DownloadScope, Embedding, FaceLandmark5, InferencePool, ModelOptions, ModelSet, VisionFrame
 
 
 @lru_cache()
@@ -57,12 +55,6 @@ def get_inference_pool() -> InferencePool:
 def clear_inference_pool() -> None:
 	model_names = [ 'arcface' ]
 	inference_manager.clear_inference_pool(__name__, model_names)
-
-
-def resolve_execution_providers() -> List[ExecutionProvider]:
-	if is_macos() and has_execution_provider('coreml'):
-		return [ 'cpu' ]
-	return state_manager.get_item('execution_providers')
 
 
 def get_model_options() -> ModelOptions:
